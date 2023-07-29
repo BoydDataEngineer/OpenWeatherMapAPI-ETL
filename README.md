@@ -63,11 +63,20 @@ This repository contains the code for a data engineering project that extracts, 
 
 Once the ETL process has run and data has been loaded into the PostgreSQL database, you can query the data using PGAdmin:
 
-1. In the PGAdmin interface, expand the `Servers` > `WeatherDB` > `Databases` > `<Your POSTGRES_DB value>` > `Schemas` > `public` > `Tables` tree in the left panel.
+1. In the PGAdmin interface, expand the `Servers` > `WeatherDB` > `Databases` > `<Your POSTGRES_DB value>` tree in the left panel.
 
-2. Right-click on the `weather` table and select `View/Edit Data` > `All Rows`.
+2. Click on your database (`<Your POSTGRES_DB value>`) to select it.
 
-3. This will open a SQL Query window with a `SELECT * FROM public.weather;` query. Click on the `Execute/Refresh` button (or press F5) to run the query and view the data.
+3. Open the `Query Tool` by clicking on the SQL icon in the top menu or by right-clicking on your database and selecting `Query Tool`.
+
+4. In the Query Editor that opens, you can write your own SQL queries. For example, to view all data in the 'weather' table, you can write:
+
+    ```sql
+    SELECT * FROM public.weather;
+    ```
+
+5. Click on the `Execute/Refresh` button (or press F5) to run the query and view the data.
+
 
 ## ETL Process
 
