@@ -1,28 +1,45 @@
+# This Docker Compose file sets up an Apache Airflow environment with PostgreSQL as the metadata database, Redis as the message broker, and Celery as the task execution engine. 
+# The Airflow environment consists of multiple services including webserver, scheduler, worker, and triggerer. PGAdmin is also included for managing the PostgreSQL database.
+# The Airflow services use environment variables for configuration. These can be overridden in a .env file or directly in the environment where docker-compose is run.
+# Volumes are used to persist data between container restarts and to share code and configuration files between the host and the containers.
+
+
+# The version of docker-compose being used
 version: '3.8'
+
+# Common configuration and environment variables for Airflow services
 x-airflow-common:
   &airflow-common
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.6.3}
+  # Docker image to use for all Airflow services
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.6.3} 
   environment:
-    &airflow-common-env
+    &airflow-common-env 
+    # Specify executor for running Airflow tasks
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    # Database configurations for SQLAlchemy connection string
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    # For backward compatibility, with Airflow <2.3
-    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # Configurations for Celery results backend and broker URL
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    # Airflow configurations for security, DAG creation, and examples loading
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    # Configuration for Airflow API authentication
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # Configuration for OpenWeatherMap API key
     OPENWEATHERMAP_API_KEY: ${OPENWEATHERMAP_API_KEY}
+    # Additional Python packages requirements
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+  # Define volume mappings for persisting data outside of Docker
   volumes:
+    # Mappings for DAGs and logs directories
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
-    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+  # Define user and group under which the services will run
   user: "${AIRFLOW_UID:-50000}:0"
+  # Dependencies that need to be started before this service
   depends_on:
     &airflow-common-depends-on
     redis:
@@ -31,49 +48,62 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  # PostgreSQL database used by Airflow
   postgres:
     image: postgres:13
+    # Environment variables to create the Airflow user and database
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
+    # Expose PostgreSQL port for external connections
     ports:
     - "5432:5432"
+    # Mount volume for persisting database data
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
+    # Define health check command and parameters
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
       start_period: 5s
+    # Always restart service if it stops
     restart: always
-
-  pgadmin:
+  # PGAdmin service for managing PostgreSQL database
+  pgadmin: 
     image: dpage/pgadmin4
     restart: always
+    # Default email and password for PGAdmin
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    # Expose PGAdmin web UI port for external connections
     ports:
       - "5050:80"
-
-  redis:
+  # Redis service used as a message broker for Celery executor
+  redis: 
     image: redis:latest
     expose:
       - 6379
+    # Define health check command and parameters
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 30s
       retries: 50
       start_period: 30s
+    # Always restart service if it stops
     restart: always
-
+  # Airflow webserver to serve the Airflow web UI
   airflow-webserver:
     <<: *airflow-common
+    # Specify command to start the webserver
     command: webserver
+    # Expose webserver port for external connections
     ports:
       - "8080:8080"
+    # Define health check command and parameters
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -81,13 +111,16 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    # Dependencies that need to be started before this service
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
-  airflow-scheduler:
+  # Airflow scheduler to schedule tasks
+  airflow-scheduler: 
     <<: *airflow-common
+    # Specify command to start the scheduler
     command: scheduler
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
@@ -95,15 +128,20 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Always restart service if it stops
     restart: always
+    # Dependencies that need to be started before this service
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
+  # Airflow worker to execute tasks
   airflow-worker:
     <<: *airflow-common
+    # Starting the worker with the celery command
     command: celery worker
+    # Defining a health check that pings the Celery worker for responsiveness
     healthcheck:
       test:
         - "CMD-SHELL"
@@ -112,32 +150,42 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Environment variables required by the worker, including a flag (DUMB_INIT_SETSID) to disable new session creation
     environment:
       <<: *airflow-common-env
       DUMB_INIT_SETSID: "0"
+    # Always restart service if it stops
     restart: always
+    # Worker service depends on the services listed in the common dependencies and the successful completion of airflow-init
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
+  # Airflow triggerer service
   airflow-triggerer:
     <<: *airflow-common
+    # Starting the triggerer with the triggerer command
     command: triggerer
+    # Defining a health check that verifies if the TriggererJob is running using Airflow's jobs check command
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+    # Automatically restarts if it stops
     restart: always
+    # Triggerer service depends on the services listed in the common dependencies and the successful completion of airflow-init
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
+  # Initialization service for Airflow
   airflow-init:
     <<: *airflow-common
+    # Overriding the default entrypoint with /bin/bash to perform custom commands
     entrypoint: /bin/bash
     command:
       - -c
@@ -203,26 +251,33 @@ services:
         exec /entrypoint airflow version
     environment:
       <<: *airflow-common-env
+      # Extra environment variables to upgrade the database, create a web user, and set username and password
       _AIRFLOW_DB_UPGRADE: 'true'
       _AIRFLOW_WWW_USER_CREATE: 'true'
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD}
       _PIP_ADDITIONAL_REQUIREMENTS: ''
+    # Running as root user
     user: "0:0"
+    # Mapping the project directory to the /sources directory inside the container
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}:/sources
 
+  # Airflow CLI service
   airflow-cli:
     <<: *airflow-common
+    # Enable the debug profile for more detailed logs
     profiles:
       - debug
     environment:
       <<: *airflow-common-env
+      # Disabling the connection check at startup
       CONNECTION_CHECK_MAX_COUNT: "0"
+    # Starts the service with a bash shell and runs the Airflow command
     command:
       - bash
       - -c
       - airflow
-
+# Defining a named volume for PostgreSQL data persistence
 volumes:
   postgres-db-volume:
